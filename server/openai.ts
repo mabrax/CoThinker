@@ -5,7 +5,7 @@ export const OPENAI_BASE_URL = 'https://api.openai.com/v1'
 export const OPENAI_MODELS = {
   realtime: 'gpt-realtime-2.1',
   transcription: 'gpt-4o-mini-transcribe',
-  reasoning: 'gpt-5.6-sol',
+  reasoning: 'gpt-5.6-terra',
 } as const
 
 export const REALTIME_VOICE = 'marin'
