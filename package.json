@@ -1,0 +1,52 @@
+{
+  "name": "cothinker-poc",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n web,server -c cyan,magenta \"npm:dev:web\" \"npm:dev:server\"",
+    "dev:web": "vite",
+    "dev:server": "node --watch --import tsx server/start.ts",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "check": "npm run lint && npm run test && npm run build",
+    "start": "tsx server/start.ts",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@excalidraw/excalidraw": "^0.18.1",
+    "express": "^5.2.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.13.2",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^6.0.3",
+    "@vitest/utils": "^4.1.10",
+    "concurrently": "^10.0.3",
+    "jsdom": "^29.1.1",
+    "oxlint": "^1.71.0",
+    "tsx": "^4.23.1",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.1",
+    "vitest": "^4.1.10"
+  },
+  "overrides": {
+    "lodash-es": "4.18.1",
+    "@excalidraw/excalidraw": {
+      "nanoid": "3.3.16"
+    },
+    "@excalidraw/mermaid-to-excalidraw": {
+      "nanoid": "5.1.16"
+    }
+  }
+}
