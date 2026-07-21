@@ -23,6 +23,40 @@ export interface CanvasNodeInput {
   origin?: CanvasElementOriginInput
 }
 
+export interface CanvasUpdateInput {
+  elementIds: string[]
+  label?: string
+  x?: number
+  y?: number
+  width?: number
+  height?: number
+}
+
+export interface CanvasGroupInput {
+  elementIds: string[]
+  name: string
+}
+
+export interface CanvasMergeInput {
+  nodeIds: string[]
+  label?: string
+  kind?: CanvasNodeKind
+  x?: number
+  y?: number
+}
+
+export type CanvasLayoutOperation = 'align' | 'distribute' | 'snap'
+export type CanvasAlignment = 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom'
+export type CanvasLayoutAxis = 'horizontal' | 'vertical'
+
+export interface CanvasLayoutInput {
+  elementIds: string[]
+  operation: CanvasLayoutOperation
+  alignment?: CanvasAlignment
+  axis?: CanvasLayoutAxis
+  gridSize?: number
+}
+
 export interface CanvasConnectionInput {
   id?: string
   fromId: string
@@ -40,6 +74,8 @@ export interface CanvasNodeSummary {
   y: number
   width: number
   height: number
+  groupId?: string
+  groupName?: string
 }
 
 export interface CanvasConnectionSummary {
@@ -61,6 +97,8 @@ export interface CanvasElementSummary {
   width: number
   height: number
   customData?: Record<string, unknown>
+  groupId?: string
+  groupName?: string
 }
 
 export interface SceneSummary {
@@ -79,7 +117,13 @@ export interface SceneSummary {
 export interface CanvasBoardHandle {
   getSceneSummary(): SceneSummary
   addNode(input: CanvasNodeInput): string
+  updateElements(input: CanvasUpdateInput): string[]
+  groupElements(input: CanvasGroupInput): string[]
+  deleteElements(elementIds: readonly string[]): string[]
+  mergeNodes(input: CanvasMergeInput): string | null
   connectNodes(input: CanvasConnectionInput): string | null
+  layoutElements(input: CanvasLayoutInput): string[]
+  acceptProposals(elementIds: readonly string[]): string[]
   getSelectedElementIds(): string[]
   selectElementIds(elementIds: readonly string[]): void
   highlightElementIds(elementIds: readonly string[]): void

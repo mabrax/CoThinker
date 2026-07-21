@@ -17,11 +17,17 @@ import type {
   ExcalidrawImperativeAPI,
 } from '@excalidraw/excalidraw/types'
 import {
+  acceptProposalElements,
   appendNode,
   createConnectionElements,
+  deleteSceneElements,
+  groupSceneElements,
+  layoutSceneElements,
+  mergeSceneNodes,
   removeAiElements,
   sceneFingerprint,
   summarizeScene,
+  updateSceneElements,
 } from '../canvas/scene'
 import type {
   CanvasBoardHandle,
@@ -182,12 +188,51 @@ export const CanvasBoard = forwardRef<CanvasBoardHandle, CanvasBoardProps>(
           })
           return result.id
         },
+        updateElements(input) {
+          const result = updateSceneElements(readElements(), input)
+          if (result.affectedIds.length === 0) return []
+          commitScene(result.elements, result.affectedIds)
+          return result.affectedIds
+        },
+        groupElements(input) {
+          const result = groupSceneElements(readElements(), input)
+          if (result.affectedIds.length === 0) return []
+          commitScene(result.elements, result.affectedIds)
+          return result.affectedIds
+        },
+        deleteElements(elementIds) {
+          const current = readElements()
+          const result = deleteSceneElements(current, elementIds)
+          if (result.affectedIds.length === 0 && result.elements.length === current.length) return []
+          const selectedIds = result.affectedIds.filter((id) => result.elements.some((element) => !element.isDeleted && element.id === id))
+          commitScene(result.elements, selectedIds)
+          return result.affectedIds
+        },
+        mergeNodes(input) {
+          const result = mergeSceneNodes(readElements(), input)
+          if (result.affectedIds.length === 0) return null
+          commitScene(result.elements, result.affectedIds)
+          return result.affectedIds[0] ?? null
+        },
         connectNodes(input) {
           const result = createConnectionElements(readElements(), input)
           if (!result) return null
           commitScene(result.elements, [result.id])
           selectElementIds([result.id], true)
           return result.id
+        },
+        layoutElements(input) {
+          const result = layoutSceneElements(readElements(), input)
+          if (result.affectedIds.length === 0) return []
+          commitScene(result.elements, result.affectedIds)
+          return result.affectedIds
+        },
+        acceptProposals(elementIds) {
+          const current = readElements()
+          const result = acceptProposalElements(current, elementIds)
+          if (result.affectedIds.length === 0 && sceneFingerprint(result.elements) === sceneFingerprint(current)) return []
+          commitScene(result.elements, result.affectedIds)
+          return result.affectedIds
         },
         getSelectedElementIds() {
           if (apiRef.current) {

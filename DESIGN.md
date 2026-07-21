@@ -26,7 +26,9 @@ flowchart LR
 - The server owns OpenAI configuration and the API key. The browser has no credential path.
 - Realtime receives a shared set of typed tool definitions. Arguments are validated before mutations, invalid calls return structured errors, and a tool never reports success unless the mutation completed.
 - Deeper reasoning is an optional server-side tool result, not a local substitute or fabricated fallback. It must not replace the Realtime collaborator’s live exchange.
-- AI-originated canvas work remains visibly distinct and removable until the human accepts it.
+- AI-originated canvas work remains visibly distinct and removable until the human accepts it. When an operation targets human-owned elements, the original remains untouched and the proposal carries action lineage, replacement IDs, and any remapped bindings. Clearing proposals removes only the AI branch; explicit promotion replaces the linked original with a coherent human-owned result and retains provenance in the serialized scene.
+
+The model-facing canvas tools are intentionally small: element updates cover labels, position, and size; named grouping, deletion, merging, and connection are separate operations; and one layout operation covers alignment, distribution, and grid snapping. Existing connections and bound labels are regenerated or remapped with every transform so proposals do not leave dangling flow.
 
 ## Workspace lifecycle
 

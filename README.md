@@ -2,7 +2,7 @@
 
 CoThinker is a shared thinking space where a person and an OpenAI Realtime collaborator discuss, draw on an editable canvas, and explicitly promote accepted work into a design document.
 
-The canvas is shared working material. AI changes are orange, dashed proposals that can be edited or removed. Nothing enters the durable document until the human selects and promotes it.
+The canvas is shared working material. AI changes are orange, dashed proposals that can be edited or removed. The collaborator can add nodes, rename or label existing elements, resize and reposition them, group, delete, merge, connect, align, distribute, and snap nodes to a configurable grid. Edits to human-owned work are cloned as reversible proposals; clearing proposals restores the untouched human scene. Nothing enters the durable document until the human selects and promotes it.
 
 ## Run locally
 
@@ -40,7 +40,7 @@ This test consumes API quota. The automated suite instead uses test-only WebRTC/
 
 - The browser renders Excalidraw, hosts the WebRTC connection, and applies validated canvas tool requests.
 - `server/` owns all OpenAI configuration, model names, voice, instructions, and the API key boundary.
-- Realtime tools use shared typed contracts. Tool results truthfully report validation, connection, or upstream errors.
+- Realtime tools use shared typed contracts. Tool results truthfully report validation, connection, or upstream errors. Existing human work is never destructively mutated by an AI tool: proposal lineage records the action and replaced elements, while explicit promotion creates an accepted human canvas state with durable provenance.
 - Workspace state persists the actual serialized canvas scene, transcript, accepted sections, selection, activity trace, and session status locally with a versioned migration path.
 - The document grows only from explicit human promotion and retains canvas-source IDs.
 
@@ -55,7 +55,7 @@ npm run secrets:check
 npm run audit:prod
 ```
 
-`npm run check` runs linting, unit tests, TypeScript, and a production build. The browser suite covers unavailable setup, a mocked Realtime connection, both transcripts, AI canvas proposals, human promotion, interruption, and disconnect cleanup.
+`npm run check` runs linting, unit tests, TypeScript, and a production build. The browser suite covers unavailable setup, a mocked Realtime connection, both transcripts, AI canvas proposals, human promotion, interruption, disconnect cleanup, and reversible edits to existing human work.
 
 ## Security
 

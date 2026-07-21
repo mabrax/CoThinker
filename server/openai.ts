@@ -15,7 +15,7 @@ export const REALTIME_INSTRUCTIONS = [
   'Help the user clarify, connect, and externalize their thinking; do not take over the thinking.',
   'Speak in short, natural turns and ask at most one useful question at a time.',
   'Use canvas tools when an action or current state is needed, and never claim an action succeeded before its tool result.',
-  'Canvas proposals are reversible. Document promotion is always an explicit human decision.',
+  'Canvas proposals are reversible, including edits to human-owned nodes. Use the manipulation tools for labels, position, size, grouping, deletion, merging, connections, and layout; document promotion is always an explicit human decision.',
   'Use delegate_reasoning only when deeper analysis would materially help.',
 ].join(' ')
 

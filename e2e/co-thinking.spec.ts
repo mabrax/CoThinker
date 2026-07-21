@@ -115,6 +115,133 @@ test('runs the production Realtime client through transcripts, proposal, human p
   await expect(page.getByTestId('document-sections')).toContainText('No accepted decisions yet.')
 })
 
+test('keeps existing human edits reversible until the human accepts them', async ({ page }) => {
+  await page.addInitScript(() => {
+    const base = {
+      angle: 0,
+      opacity: 100,
+      seed: 1,
+      version: 1,
+      versionNonce: 1,
+      index: null,
+      isDeleted: false,
+      groupIds: [],
+      frameId: null,
+      updated: 1,
+      link: null,
+      locked: false,
+    }
+    const node = {
+      ...base,
+      id: 'human-seed',
+      type: 'rectangle',
+      x: 80,
+      y: 80,
+      width: 180,
+      height: 84,
+      strokeColor: '#334155',
+      backgroundColor: '#ffffff',
+      fillStyle: 'solid',
+      strokeWidth: 2,
+      strokeStyle: 'solid',
+      roughness: 1,
+      roundness: { type: 3 },
+      boundElements: [{ id: 'human-seed-label', type: 'text' }],
+      customData: { canvasBoard: { role: 'node', origin: 'human', kind: 'idea' } },
+    }
+    const label = {
+      ...base,
+      id: 'human-seed-label',
+      type: 'text',
+      x: 90,
+      y: 108,
+      width: 160,
+      height: 28,
+      strokeColor: '#334155',
+      backgroundColor: 'transparent',
+      fillStyle: 'solid',
+      strokeWidth: 1,
+      strokeStyle: 'solid',
+      roughness: 1,
+      roundness: null,
+      boundElements: null,
+      text: 'Original human idea',
+      originalText: 'Original human idea',
+      fontSize: 18,
+      fontFamily: 1,
+      textAlign: 'center',
+      verticalAlign: 'middle',
+      containerId: 'human-seed',
+      autoResize: true,
+      lineHeight: 1.25,
+      customData: { canvasBoard: { role: 'node', origin: 'human', kind: 'idea' } },
+    }
+    const workspace = {
+      version: 2,
+      transcript: [],
+      sections: [],
+      events: [],
+      selectedIds: [],
+      scene: JSON.stringify({ type: 'excalidraw', version: 2, source: 'local', elements: [node, label] }),
+      session: { status: 'idle', message: 'Connect OpenAI Realtime to start collaborating.' },
+    }
+    window.localStorage.setItem('cothinker-workspace-v2', JSON.stringify(workspace))
+  })
+  await installRealtimeFixture(page)
+  await page.route('**/api/health', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true, openaiConfigured: true }),
+  }))
+  await page.route('**/api/realtime/session', (route) => route.fulfill({
+    status: 201,
+    contentType: 'application/sdp',
+    body: 'test-answer',
+  }))
+
+  await page.goto('/')
+  await page.getByText('Connect OpenAI Realtime', { exact: true }).click()
+  await expect(page.getByText('Live with OpenAI')).toBeVisible()
+
+  await sendRealtimeEvent(page, {
+    type: 'response.done',
+    response: {
+      output: [{
+        type: 'function_call',
+        call_id: 'human-edit-clear',
+        name: 'update_canvas_elements',
+        arguments: JSON.stringify({ elementIds: ['human-seed'], label: 'Reversible AI edit', x: 260 }),
+      }],
+    },
+  })
+  await expect(page.getByTestId('canvas-board')).toHaveAttribute('data-node-count', '2')
+  await expect(page.getByTestId('canvas-board-debug')).toContainText('Original human idea')
+  await expect(page.getByTestId('canvas-board-debug')).toContainText('Reversible AI edit')
+  await page.getByText('Clear AI proposals', { exact: true }).click()
+  await expect(page.getByTestId('canvas-board')).toHaveAttribute('data-node-count', '1')
+  await expect(page.getByTestId('canvas-board-debug')).toContainText('Original human idea')
+  await expect(page.getByTestId('canvas-board-debug')).not.toContainText('Reversible AI edit')
+
+  await sendRealtimeEvent(page, {
+    type: 'response.done',
+    response: {
+      output: [{
+        type: 'function_call',
+        call_id: 'human-edit-accept',
+        name: 'update_canvas_elements',
+        arguments: JSON.stringify({ elementIds: ['human-seed'], label: 'Accepted AI edit', x: 300 }),
+      }],
+    },
+  })
+  await expect(page.getByTestId('promote-selection')).toBeEnabled()
+  await page.getByLabel('Section title').fill('Accepted human edit')
+  await page.getByTestId('promote-selection').click()
+  await expect(page.getByTestId('canvas-board')).toHaveAttribute('data-node-count', '1')
+  await expect(page.getByTestId('canvas-board-debug')).toContainText('Accepted AI edit')
+  await expect(page.getByTestId('canvas-board-debug')).not.toContainText('Original human idea')
+  await expect(page.getByTestId('document-sections')).toContainText('Accepted human edit')
+})
+
 async function sendRealtimeEvent(page: Page, event: unknown): Promise<void> {
   await page.evaluate((payload) => {
     const fixture = (window as unknown as { __testRealtime?: { channel?: { receive(value: unknown): void } } }).__testRealtime

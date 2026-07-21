@@ -62,9 +62,11 @@ function App() {
 
   const promoteElements = useCallback(
     (elementIds: string[], suppliedTitle?: string) => {
-      const currentScene = getScene()
       const ids = elementIds.length > 0 ? elementIds : workspace.selectedIds
-      const selected = currentScene.elements.filter((element) => ids.includes(element.id))
+      const acceptedIds = canvasRef.current?.acceptProposals(ids) ?? []
+      const currentScene = getScene()
+      const candidateIds = new Set([...ids, ...acceptedIds])
+      const selected = currentScene.elements.filter((element) => candidateIds.has(element.id))
       if (selected.length === 0) {
         addTranscript('system', 'Select one or more canvas elements before promoting them.')
         return
