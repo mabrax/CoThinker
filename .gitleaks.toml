@@ -1,0 +1,11 @@
+title = "CoThinker secret scanning"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "openai-api-key"
+description = "OpenAI API key"
+regex = '''(?i)(sk-(?:(?:proj|svcacct)-)?[a-z0-9_-]{20,})'''
+secretGroup = 1
+keywords = ["sk-"]

@@ -73,7 +73,18 @@ npm run check
 npm run test:e2e
 ```
 
-`npm run check` runs lint, four unit tests, TypeScript, and a production build. The browser suite exercises the full local story and the unconfigured OpenAI API boundaries.
+`npm run check` runs lint, unit tests, TypeScript, and a production build. The browser suite exercises the full local story and the unconfigured OpenAI API boundaries.
+
+## Security checks
+
+Local credentials belong only in `.env`; that file and other `.env.*` variants are ignored by Git. The repository also includes a layered secret-protection setup:
+
+- [Gitleaks](https://github.com/gitleaks/gitleaks) scans every pull request and push in GitHub Actions.
+- `.pre-commit-config.yaml` lets contributors block accidental secret commits locally. Install [pre-commit](https://pre-commit.com/), then run `pre-commit install` once per clone.
+- `npm run secrets:check` scans the complete Git history on demand. Install the [Gitleaks CLI](https://github.com/gitleaks/gitleaks#installing) first.
+- Dependabot checks npm dependencies and GitHub Actions weekly. CI also runs `npm audit --omit=dev --audit-level=high`.
+
+GitHub Secret Scanning and Push Protection should be enabled in the repository settings after the public repository is created. They block supported credential patterns at the remote; Gitleaks provides an additional configurable check for commits and pull requests.
 
 ## Current boundary
 

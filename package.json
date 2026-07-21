@@ -13,6 +13,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "check": "npm run lint && npm run test && npm run build",
+    "secrets:check": "gitleaks git --redact --verbose",
+    "audit:prod": "npm audit --omit=dev --audit-level=high",
     "start": "tsx server/start.ts",
     "preview": "vite preview"
   },
