@@ -17,9 +17,7 @@ import type {
   ExcalidrawImperativeAPI,
 } from '@excalidraw/excalidraw/types'
 import {
-  DEFAULT_CANVAS_SEED,
   appendNode,
-  buildSeedElements,
   createConnectionElements,
   removeAiElements,
   sceneFingerprint,
@@ -50,16 +48,17 @@ export const CanvasBoard = forwardRef<CanvasBoardHandle, CanvasBoardProps>(
     {
       className,
       style,
-      initialSeed = DEFAULT_CANVAS_SEED,
+      initialScene = null,
       testId = 'canvas-board',
       onSceneChange,
+      onSceneSerialized,
       onSelectionChange,
     },
     ref,
   ) {
     const initialElementsRef = useRef<ExcalidrawElement[] | null>(null)
     if (initialElementsRef.current === null) {
-      initialElementsRef.current = buildSeedElements(initialSeed)
+      initialElementsRef.current = parseInitialScene(initialScene)
     }
 
     const initialElements = initialElementsRef.current
@@ -88,8 +87,16 @@ export const CanvasBoard = forwardRef<CanvasBoardHandle, CanvasBoardProps>(
         const summary = summarizeScene(elements, selectedIds)
         setDebugSummary(summary)
         onSceneChange?.(summary)
+        onSceneSerialized?.(
+          serializeAsJSON(
+            elements,
+            apiRef.current?.getAppState() ?? {},
+            apiRef.current?.getFiles() ?? {},
+            'local',
+          ),
+        )
       },
-      [onSceneChange],
+      [onSceneChange, onSceneSerialized],
     )
 
     const publishSelection = useCallback(
@@ -210,17 +217,11 @@ export const CanvasBoard = forwardRef<CanvasBoardHandle, CanvasBoardProps>(
           commitScene(removeAiElements(readElements()), [])
         },
         reset() {
-          commitScene([...initialElements], [])
-          apiRef.current?.scrollToContent(initialElements, {
-            fitToContent: true,
-            maxZoom: 1,
-            animate: true,
-          })
+          commitScene([], [])
         },
       }),
       [
         commitScene,
-        initialElements,
         readElements,
         selectElementIds,
       ],
@@ -317,3 +318,13 @@ export type {
 } from '../canvas/types'
 
 export default CanvasBoard
+
+function parseInitialScene(initialScene: string | null): ExcalidrawElement[] {
+  if (!initialScene) return []
+  try {
+    const parsed = JSON.parse(initialScene) as { elements?: unknown }
+    return Array.isArray(parsed.elements) ? (parsed.elements as ExcalidrawElement[]) : []
+  } catch {
+    return []
+  }
+}

@@ -11,7 +11,6 @@ import type {
   CanvasElementOriginInput,
   CanvasNodeInput,
   CanvasNodeKind,
-  CanvasSeed,
   SceneSummary,
 } from './types'
 
@@ -20,8 +19,6 @@ const AI_BACKGROUND = '#fff4e6'
 const AI_TEXT = '#7c2d12'
 const HUMAN_STROKE = '#334155'
 const HUMAN_BACKGROUND = '#ffffff'
-const SEED_STROKE = '#2563eb'
-const SEED_BACKGROUND = '#eff6ff'
 
 let generatedId = 0
 
@@ -31,49 +28,6 @@ interface CanvasMarker {
   kind?: CanvasNodeKind
   fromId?: string
   toId?: string
-}
-
-export const DEFAULT_CANVAS_SEED: CanvasSeed = {
-  nodes: [
-    {
-      id: 'seed-context',
-      label: 'Capture context',
-      x: 80,
-      y: 170,
-      kind: 'idea',
-      origin: 'seed',
-    },
-    {
-      id: 'seed-proposal',
-      label: 'Propose next steps',
-      x: 360,
-      y: 170,
-      kind: 'process',
-      origin: 'ai',
-    },
-    {
-      id: 'seed-review',
-      label: 'Review together',
-      x: 640,
-      y: 170,
-      kind: 'decision',
-      origin: 'seed',
-    },
-  ],
-  connections: [
-    {
-      id: 'seed-context-to-proposal',
-      fromId: 'seed-context',
-      toId: 'seed-proposal',
-      origin: 'seed',
-    },
-    {
-      id: 'seed-proposal-to-review',
-      fromId: 'seed-proposal',
-      toId: 'seed-review',
-      origin: 'seed',
-    },
-  ],
 }
 
 export function normalizeOrigin(
@@ -100,17 +54,6 @@ function styleForOrigin(origin: CanvasElementOrigin) {
       backgroundColor: AI_BACKGROUND,
       fillStyle: 'solid' as const,
       strokeStyle: 'dashed' as const,
-      strokeWidth: 2,
-      roughness: 1,
-    }
-  }
-
-  if (origin === 'seed') {
-    return {
-      strokeColor: SEED_STROKE,
-      backgroundColor: SEED_BACKGROUND,
-      fillStyle: 'solid' as const,
-      strokeStyle: 'solid' as const,
       strokeWidth: 2,
       roughness: 1,
     }
@@ -250,47 +193,6 @@ export function createConnectionElements(
   }
 }
 
-export function buildSeedElements(seed: CanvasSeed | false) {
-  if (seed === false) return []
-
-  const nodeIds = new Set(seed.nodes.map((node) => node.id))
-  const skeletons: ExcalidrawElementSkeleton[] = seed.nodes.map((node) =>
-    createNodeSkeleton(node, 'seed'),
-  )
-
-  for (const connection of seed.connections ?? []) {
-    if (!nodeIds.has(connection.fromId) || !nodeIds.has(connection.toId)) continue
-    const origin = normalizeOrigin(connection.origin, 'seed')
-    const marker: CanvasMarker = {
-      role: 'connection',
-      origin,
-      fromId: connection.fromId,
-      toId: connection.toId,
-    }
-    const label = connection.label?.trim()
-    skeletons.push({
-      id: connection.id ?? nextId('connection'),
-      type: 'arrow',
-      x: 0,
-      y: 0,
-      ...styleForOrigin(origin),
-      start: { id: connection.fromId },
-      end: { id: connection.toId },
-      label: label
-        ? {
-            text: label,
-            fontSize: 16,
-            strokeColor: origin === 'ai' ? AI_TEXT : undefined,
-            customData: markerData(marker),
-          }
-        : undefined,
-      customData: markerData(marker),
-    })
-  }
-
-  return convertToExcalidrawElements(skeletons, { regenerateIds: false })
-}
-
 export function appendNode(
   currentElements: readonly ExcalidrawElement[],
   input: CanvasNodeInput,
@@ -383,8 +285,7 @@ function markerFor(element: ExcalidrawElement): CanvasMarker | undefined {
   }
   if (
     marker.origin !== 'human' &&
-    marker.origin !== 'ai' &&
-    marker.origin !== 'seed'
+    marker.origin !== 'ai'
   ) {
     return undefined
   }
@@ -473,9 +374,6 @@ export function summarizeScene(
     ).length,
     aiElementCount: activeElements.filter(
       (element) => originFor(element) === 'ai',
-    ).length,
-    seedElementCount: activeElements.filter(
-      (element) => originFor(element) === 'seed',
     ).length,
     selectedElementIds: [...selectedElementIds],
     elements: summaryElements,

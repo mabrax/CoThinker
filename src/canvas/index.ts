@@ -1,4 +1,3 @@
-export { DEFAULT_CANVAS_SEED } from './scene'
 export type {
   CanvasBoardHandle,
   CanvasBoardProps,
@@ -10,7 +9,5 @@ export type {
   CanvasNodeInput,
   CanvasNodeKind,
   CanvasNodeSummary,
-  CanvasSeed,
-  CanvasSeedNode,
   SceneSummary,
 } from './types'
