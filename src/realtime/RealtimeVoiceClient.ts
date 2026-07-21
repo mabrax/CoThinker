@@ -1,9 +1,9 @@
 import type {
   RealtimeConnectionStatus,
   RealtimeServerEvent,
-  RealtimeToolArguments,
   RealtimeVoiceClientOptions,
 } from './types'
+import { isRealtimeToolName } from '../../shared/realtimeTools'
 
 const DATA_CHANNEL_LABEL = 'oai-events'
 const DEFAULT_SESSION_ENDPOINT = '/api/realtime/session'
@@ -11,7 +11,7 @@ const DEFAULT_SESSION_ENDPOINT = '/api/realtime/session'
 interface FunctionCall {
   callId: string
   name: string
-  arguments: RealtimeToolArguments
+  arguments: unknown
 }
 
 export class RealtimeVoiceClient {
@@ -287,6 +287,18 @@ export class RealtimeVoiceClient {
       if (!this.options.onToolCall) {
         throw new Error(`No handler is registered for ${call.name}.`)
       }
+      if (!isRealtimeToolName(call.name)) {
+        return {
+          callId: call.callId,
+          value: serializeToolOutput({
+            ok: false,
+            error: {
+              code: 'UNKNOWN_TOOL',
+              message: `Unknown realtime tool: ${call.name}`,
+            },
+          }),
+        }
+      }
       const result = await this.options.onToolCall(call.name, call.arguments)
       return { callId: call.callId, value: serializeToolOutput(result) }
     } catch (error) {
@@ -387,13 +399,13 @@ function readFunctionCall(value: unknown): FunctionCall | undefined {
   if (!isRecord(value) || value.type !== 'function_call') return undefined
   if (typeof value.call_id !== 'string' || typeof value.name !== 'string') return undefined
 
-  let args: RealtimeToolArguments = {}
+  let args: unknown = {}
   if (typeof value.arguments === 'string' && value.arguments.trim()) {
     try {
       const parsed: unknown = JSON.parse(value.arguments)
-      args = isRecord(parsed) ? parsed : { value: parsed }
+      args = parsed
     } catch {
-      args = { raw: value.arguments }
+      args = value.arguments
     }
   }
   return { callId: value.call_id, name: value.name, arguments: args }

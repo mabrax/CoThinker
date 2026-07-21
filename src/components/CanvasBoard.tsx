@@ -17,13 +17,17 @@ import type {
   ExcalidrawImperativeAPI,
 } from '@excalidraw/excalidraw/types'
 import {
-  DEFAULT_CANVAS_SEED,
+  acceptProposalElements,
   appendNode,
-  buildSeedElements,
   createConnectionElements,
+  deleteSceneElements,
+  groupSceneElements,
+  layoutSceneElements,
+  mergeSceneNodes,
   removeAiElements,
   sceneFingerprint,
   summarizeScene,
+  updateSceneElements,
 } from '../canvas/scene'
 import type {
   CanvasBoardHandle,
@@ -50,16 +54,17 @@ export const CanvasBoard = forwardRef<CanvasBoardHandle, CanvasBoardProps>(
     {
       className,
       style,
-      initialSeed = DEFAULT_CANVAS_SEED,
+      initialScene = null,
       testId = 'canvas-board',
       onSceneChange,
+      onSceneSerialized,
       onSelectionChange,
     },
     ref,
   ) {
     const initialElementsRef = useRef<ExcalidrawElement[] | null>(null)
     if (initialElementsRef.current === null) {
-      initialElementsRef.current = buildSeedElements(initialSeed)
+      initialElementsRef.current = parseInitialScene(initialScene)
     }
 
     const initialElements = initialElementsRef.current
@@ -88,8 +93,16 @@ export const CanvasBoard = forwardRef<CanvasBoardHandle, CanvasBoardProps>(
         const summary = summarizeScene(elements, selectedIds)
         setDebugSummary(summary)
         onSceneChange?.(summary)
+        onSceneSerialized?.(
+          serializeAsJSON(
+            elements,
+            apiRef.current?.getAppState() ?? {},
+            apiRef.current?.getFiles() ?? {},
+            'local',
+          ),
+        )
       },
-      [onSceneChange],
+      [onSceneChange, onSceneSerialized],
     )
 
     const publishSelection = useCallback(
@@ -175,12 +188,51 @@ export const CanvasBoard = forwardRef<CanvasBoardHandle, CanvasBoardProps>(
           })
           return result.id
         },
+        updateElements(input) {
+          const result = updateSceneElements(readElements(), input)
+          if (result.affectedIds.length === 0) return []
+          commitScene(result.elements, result.affectedIds)
+          return result.affectedIds
+        },
+        groupElements(input) {
+          const result = groupSceneElements(readElements(), input)
+          if (result.affectedIds.length === 0) return []
+          commitScene(result.elements, result.affectedIds)
+          return result.affectedIds
+        },
+        deleteElements(elementIds) {
+          const current = readElements()
+          const result = deleteSceneElements(current, elementIds)
+          if (result.affectedIds.length === 0 && result.elements.length === current.length) return []
+          const selectedIds = result.affectedIds.filter((id) => result.elements.some((element) => !element.isDeleted && element.id === id))
+          commitScene(result.elements, selectedIds)
+          return result.affectedIds
+        },
+        mergeNodes(input) {
+          const result = mergeSceneNodes(readElements(), input)
+          if (result.affectedIds.length === 0) return null
+          commitScene(result.elements, result.affectedIds)
+          return result.affectedIds[0] ?? null
+        },
         connectNodes(input) {
           const result = createConnectionElements(readElements(), input)
           if (!result) return null
           commitScene(result.elements, [result.id])
           selectElementIds([result.id], true)
           return result.id
+        },
+        layoutElements(input) {
+          const result = layoutSceneElements(readElements(), input)
+          if (result.affectedIds.length === 0) return []
+          commitScene(result.elements, result.affectedIds)
+          return result.affectedIds
+        },
+        acceptProposals(elementIds) {
+          const current = readElements()
+          const result = acceptProposalElements(current, elementIds)
+          if (result.affectedIds.length === 0 && sceneFingerprint(result.elements) === sceneFingerprint(current)) return []
+          commitScene(result.elements, result.affectedIds)
+          return result.affectedIds
         },
         getSelectedElementIds() {
           if (apiRef.current) {
@@ -210,17 +262,11 @@ export const CanvasBoard = forwardRef<CanvasBoardHandle, CanvasBoardProps>(
           commitScene(removeAiElements(readElements()), [])
         },
         reset() {
-          commitScene([...initialElements], [])
-          apiRef.current?.scrollToContent(initialElements, {
-            fitToContent: true,
-            maxZoom: 1,
-            animate: true,
-          })
+          commitScene([], [])
         },
       }),
       [
         commitScene,
-        initialElements,
         readElements,
         selectElementIds,
       ],
@@ -317,3 +363,13 @@ export type {
 } from '../canvas/types'
 
 export default CanvasBoard
+
+function parseInitialScene(initialScene: string | null): ExcalidrawElement[] {
+  if (!initialScene) return []
+  try {
+    const parsed = JSON.parse(initialScene) as { elements?: unknown }
+    return Array.isArray(parsed.elements) ? (parsed.elements as ExcalidrawElement[]) : []
+  } catch {
+    return []
+  }
+}

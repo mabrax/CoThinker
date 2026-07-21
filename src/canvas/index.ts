@@ -1,16 +1,20 @@
-export { DEFAULT_CANVAS_SEED } from './scene'
 export type {
   CanvasBoardHandle,
   CanvasBoardProps,
+  CanvasAlignment,
   CanvasConnectionInput,
   CanvasConnectionSummary,
   CanvasElementSummary,
   CanvasElementOrigin,
   CanvasElementOriginInput,
+  CanvasGroupInput,
+  CanvasLayoutAxis,
+  CanvasLayoutInput,
+  CanvasLayoutOperation,
+  CanvasMergeInput,
   CanvasNodeInput,
   CanvasNodeKind,
   CanvasNodeSummary,
-  CanvasSeed,
-  CanvasSeedNode,
   SceneSummary,
+  CanvasUpdateInput,
 } from './types'

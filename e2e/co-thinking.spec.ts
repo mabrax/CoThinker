@@ -1,108 +1,316 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => window.localStorage.clear())
+  await page.addInitScript(() => {
+    if (window.sessionStorage.getItem('cothinker-e2e-initialized')) return
+    window.localStorage.clear()
+    window.sessionStorage.setItem('cothinker-e2e-initialized', 'true')
+  })
 })
 
-test('completes the local co-thinking loop and preserves accepted work', async ({
-  page,
-}) => {
-  const consoleErrors: string[] = []
-  page.on('console', (message) => {
-    if (message.type() === 'error') consoleErrors.push(message.text())
-  })
-  await page.route('**/api/health', (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ ok: true, openaiConfigured: false }),
-    }),
-  )
+test('shows an honest setup-required state while retaining the blank manual workspace', async ({ page }) => {
+  await page.route('**/api/health', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true, openaiConfigured: false }),
+  }))
 
   await page.goto('/')
 
   await expect(page.getByRole('heading', { name: 'CoThinker' })).toBeVisible()
-  await expect(page.getByTestId('canvas-board')).toHaveAttribute(
-    'data-canvas-ready',
-    'true',
-  )
-  await expect(page.getByText('Local voice and demo mode are ready')).toBeVisible()
+  await expect(page.getByText('Setup required: set OPENAI_API_KEY on the server and restart it.')).toBeVisible()
+  await expect(page.getByText('Connect OpenAI Realtime', { exact: true })).toBeDisabled()
+  await expect(page.getByLabel('Message the connected collaborator')).toBeDisabled()
+  await expect(page.getByTestId('canvas-board')).toHaveAttribute('data-canvas-ready', 'true')
+  await expect(page.getByTestId('canvas-board')).toHaveAttribute('data-node-count', '0')
+  await expect(page.getByTestId('promote-selection')).toBeDisabled()
+})
 
-  await page.getByTestId('run-demo').click()
+test('runs the production Realtime client through transcripts, proposal, human promotion, interruption, and disconnect cleanup', async ({ page }) => {
+  await installRealtimeFixture(page)
+  await page.route('**/api/health', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true, openaiConfigured: true }),
+  }))
+  await page.route('**/api/realtime/session', (route) => route.fulfill({
+    status: 201,
+    contentType: 'application/sdp',
+    body: 'test-answer',
+  }))
 
-  await expect(page.getByTestId('transcript')).toContainText(
-    'I created a complete co-thinking loop',
-  )
-  await expect(page.getByTestId('document-sections')).toContainText(
-    'Realtime co-thinking architecture',
-  )
+  await page.goto('/')
+  await page.getByText('Connect OpenAI Realtime', { exact: true }).click()
+  await expect(page.getByText('Live with OpenAI')).toBeVisible()
 
-  const demoState = await page.evaluate(() => window.__cothinker?.getState())
-  expect(demoState).toBeDefined()
-  const demoLabels = demoState?.scene.elements.map((element) =>
-    element.label?.replace(/\s+/g, ' '),
-  )
-  expect(demoLabels).toEqual(
-    expect.arrayContaining([
-      'Human collaborator',
-      'Realtime voice agent',
-      'Shared session state',
-      'Reasoning delegate',
-      'Durable design document',
-    ]),
-  )
-  expect(demoState?.sections.at(-1)).toMatchObject({
-    title: 'Realtime co-thinking architecture',
-    source: 'demo',
+  await sendRealtimeEvent(page, {
+    type: 'conversation.item.input_audio_transcription.completed',
+    transcript: 'I want to explore durable notes.',
   })
-  expect(demoState?.sections.at(-1)?.elementIds).toHaveLength(5)
+  await sendRealtimeEvent(page, {
+    type: 'response.output_audio_transcript.delta',
+    item_id: 'assistant-turn',
+    delta: 'Let us capture that as a proposal.',
+  })
+  await sendRealtimeEvent(page, {
+    type: 'response.output_audio_transcript.done',
+    item_id: 'assistant-turn',
+  })
+  await expect(page.getByTestId('transcript')).toContainText('I want to explore durable notes.')
+  await expect(page.getByTestId('transcript')).toContainText('Let us capture that as a proposal.')
 
-  await page.getByLabel('Speak or type a design move').fill('Add an archivist agent')
-  await page.getByRole('button', { name: 'Send' }).click()
+  await sendRealtimeEvent(page, {
+    type: 'response.done',
+    response: {
+      output: [{
+        type: 'function_call',
+        call_id: 'canvas-proposal',
+        name: 'add_canvas_node',
+        arguments: JSON.stringify({ label: 'Durable notes' }),
+      }],
+    },
+  })
+  await expect(page.getByTestId('canvas-board')).toHaveAttribute('data-node-count', '1')
+  await expect(page.getByTestId('canvas-board-debug')).toContainText('Durable notes')
+  await expect(page.getByTestId('promote-selection')).toBeEnabled()
+  await expect.poll(() => hasToolResult(page, 'canvas-proposal')).toBe(true)
 
-  await expect(page.getByTestId('transcript')).toContainText(
-    'I added “archivist agent” as a reversible AI proposal.',
-  )
-  await expect(page.getByTestId('canvas-board')).not.toHaveAttribute(
-    'data-selected-ids',
-    '',
-  )
+  await sendRealtimeEvent(page, {
+    type: 'response.done',
+    response: {
+      output: [{
+        type: 'function_call',
+        call_id: 'attempted-promotion',
+        name: 'promote_to_document',
+        arguments: JSON.stringify({ nodeIds: [] }),
+      }],
+    },
+  })
+  await expect.poll(() => hasToolResult(page, 'attempted-promotion')).toBe(true)
+  await expect(page.getByTestId('document-sections')).toContainText('No accepted decisions yet.')
+  await expect(page.getByTestId('transcript')).toContainText('requested promotion')
 
-  await page.getByLabel('Section title').fill('Accepted archival role')
+  await page.getByLabel('Section title').fill('Durable notes decision')
   await page.getByTestId('promote-selection').click()
-  await expect(page.getByTestId('document-sections')).toContainText(
-    'Accepted archival role',
-  )
+  await expect(page.getByTestId('document-sections')).toContainText('Durable notes decision')
 
-  const finalState = await page.evaluate(() => window.__cothinker?.getState())
-  expect(
-    finalState?.scene.elements.map((element) =>
-      element.label?.replace(/\s+/g, ' '),
-    ),
-  ).toContain(
-    'archivist agent',
-  )
-  expect(finalState?.sections).toHaveLength(2)
-  expect(finalState?.sections[1]).toMatchObject({
-    title: 'Accepted archival role',
-    source: 'human',
-  })
+  await sendRealtimeEvent(page, { type: 'response.output_audio.delta' })
+  await expect(page.getByText('Speaking…')).toBeVisible()
+  await sendRealtimeEvent(page, { type: 'input_audio_buffer.speech_started' })
+  await expect(page.getByText('Listening…')).toBeVisible()
 
-  await page.getByRole('button', { name: 'Clear AI proposals' }).click()
-  const clearedState = await page.evaluate(() => window.__cothinker?.getState())
-  const clearedLabels = clearedState?.scene.elements.map((element) =>
-    element.label?.replace(/\s+/g, ' '),
-  )
-  expect(clearedLabels).toContain('Human collaborator')
-  expect(clearedLabels).not.toContain('archivist agent')
-  expect(clearedState?.sections).toHaveLength(2)
+  await page.getByText('Disconnect live AI', { exact: true }).click()
+  await expect(page.getByText('Disconnected from OpenAI Realtime.')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => {
+    const fixture = (window as unknown as { __testRealtime?: { tracksStopped: boolean } }).__testRealtime
+    return fixture?.tracksStopped
+  })).toBe(true)
+
+  await page.reload()
+  await expect(page.getByTestId('canvas-board')).toHaveAttribute('data-node-count', '1')
+  await expect(page.getByTestId('document-sections')).toContainText('Durable notes decision')
 
   await page.getByRole('button', { name: 'New session' }).click()
-  await expect(page.getByTestId('document-sections')).toContainText(
-    'No accepted decisions yet.',
-  )
-  const resetState = await page.evaluate(() => window.__cothinker?.getState())
-  expect(resetState?.sections).toEqual([])
-  expect(resetState?.transcript).toEqual([])
-  expect(consoleErrors).toEqual([])
+  await expect(page.getByTestId('canvas-board')).toHaveAttribute('data-node-count', '0')
+  await expect(page.getByTestId('document-sections')).toContainText('No accepted decisions yet.')
 })
+
+test('keeps existing human edits reversible until the human accepts them', async ({ page }) => {
+  await page.addInitScript(() => {
+    const base = {
+      angle: 0,
+      opacity: 100,
+      seed: 1,
+      version: 1,
+      versionNonce: 1,
+      index: null,
+      isDeleted: false,
+      groupIds: [],
+      frameId: null,
+      updated: 1,
+      link: null,
+      locked: false,
+    }
+    const node = {
+      ...base,
+      id: 'human-seed',
+      type: 'rectangle',
+      x: 80,
+      y: 80,
+      width: 180,
+      height: 84,
+      strokeColor: '#334155',
+      backgroundColor: '#ffffff',
+      fillStyle: 'solid',
+      strokeWidth: 2,
+      strokeStyle: 'solid',
+      roughness: 1,
+      roundness: { type: 3 },
+      boundElements: [{ id: 'human-seed-label', type: 'text' }],
+      customData: { canvasBoard: { role: 'node', origin: 'human', kind: 'idea' } },
+    }
+    const label = {
+      ...base,
+      id: 'human-seed-label',
+      type: 'text',
+      x: 90,
+      y: 108,
+      width: 160,
+      height: 28,
+      strokeColor: '#334155',
+      backgroundColor: 'transparent',
+      fillStyle: 'solid',
+      strokeWidth: 1,
+      strokeStyle: 'solid',
+      roughness: 1,
+      roundness: null,
+      boundElements: null,
+      text: 'Original human idea',
+      originalText: 'Original human idea',
+      fontSize: 18,
+      fontFamily: 1,
+      textAlign: 'center',
+      verticalAlign: 'middle',
+      containerId: 'human-seed',
+      autoResize: true,
+      lineHeight: 1.25,
+      customData: { canvasBoard: { role: 'node', origin: 'human', kind: 'idea' } },
+    }
+    const workspace = {
+      version: 2,
+      transcript: [],
+      sections: [],
+      events: [],
+      selectedIds: [],
+      scene: JSON.stringify({ type: 'excalidraw', version: 2, source: 'local', elements: [node, label] }),
+      session: { status: 'idle', message: 'Connect OpenAI Realtime to start collaborating.' },
+    }
+    window.localStorage.setItem('cothinker-workspace-v2', JSON.stringify(workspace))
+  })
+  await installRealtimeFixture(page)
+  await page.route('**/api/health', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true, openaiConfigured: true }),
+  }))
+  await page.route('**/api/realtime/session', (route) => route.fulfill({
+    status: 201,
+    contentType: 'application/sdp',
+    body: 'test-answer',
+  }))
+
+  await page.goto('/')
+  await page.getByText('Connect OpenAI Realtime', { exact: true }).click()
+  await expect(page.getByText('Live with OpenAI')).toBeVisible()
+
+  await sendRealtimeEvent(page, {
+    type: 'response.done',
+    response: {
+      output: [{
+        type: 'function_call',
+        call_id: 'human-edit-clear',
+        name: 'update_canvas_elements',
+        arguments: JSON.stringify({ elementIds: ['human-seed'], label: 'Reversible AI edit', x: 260 }),
+      }],
+    },
+  })
+  await expect(page.getByTestId('canvas-board')).toHaveAttribute('data-node-count', '2')
+  await expect(page.getByTestId('canvas-board-debug')).toContainText('Original human idea')
+  await expect(page.getByTestId('canvas-board-debug')).toContainText('Reversible AI edit')
+  await page.getByText('Clear AI proposals', { exact: true }).click()
+  await expect(page.getByTestId('canvas-board')).toHaveAttribute('data-node-count', '1')
+  await expect(page.getByTestId('canvas-board-debug')).toContainText('Original human idea')
+  await expect(page.getByTestId('canvas-board-debug')).not.toContainText('Reversible AI edit')
+
+  await sendRealtimeEvent(page, {
+    type: 'response.done',
+    response: {
+      output: [{
+        type: 'function_call',
+        call_id: 'human-edit-accept',
+        name: 'update_canvas_elements',
+        arguments: JSON.stringify({ elementIds: ['human-seed'], label: 'Accepted AI edit', x: 300 }),
+      }],
+    },
+  })
+  await expect(page.getByTestId('promote-selection')).toBeEnabled()
+  await page.getByLabel('Section title').fill('Accepted human edit')
+  await page.getByTestId('promote-selection').click()
+  await expect(page.getByTestId('canvas-board')).toHaveAttribute('data-node-count', '1')
+  await expect(page.getByTestId('canvas-board-debug')).toContainText('Accepted AI edit')
+  await expect(page.getByTestId('canvas-board-debug')).not.toContainText('Original human idea')
+  await expect(page.getByTestId('document-sections')).toContainText('Accepted human edit')
+})
+
+async function sendRealtimeEvent(page: Page, event: unknown): Promise<void> {
+  await page.evaluate((payload) => {
+    const fixture = (window as unknown as { __testRealtime?: { channel?: { receive(value: unknown): void } } }).__testRealtime
+    fixture?.channel?.receive(payload)
+  }, event)
+}
+
+async function hasToolResult(page: Page, callId: string): Promise<boolean | undefined> {
+  return page.evaluate((id) => {
+    const fixture = (window as unknown as { __testRealtime?: { sent: string[] } }).__testRealtime
+    return fixture?.sent.some((event) => event.includes(id))
+  }, callId)
+}
+
+async function installRealtimeFixture(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    class TestChannel extends EventTarget {
+      readyState = 'connecting'
+      readonly sent: string[] = []
+
+      send(payload: string): void { this.sent.push(payload) }
+
+      open(): void {
+        this.readyState = 'open'
+        this.dispatchEvent(new Event('open'))
+      }
+
+      close(): void {
+        if (this.readyState === 'closed') return
+        this.readyState = 'closed'
+        this.dispatchEvent(new Event('close'))
+      }
+
+      receive(value: unknown): void {
+        this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(value) }))
+      }
+    }
+
+    const fixture: { channel?: TestChannel; sent: string[]; tracksStopped: boolean } = { sent: [], tracksStopped: false }
+    class TestPeerConnection extends EventTarget {
+      connectionState = 'connected'
+      localDescription: RTCSessionDescriptionInit | null = null
+      readonly channel = new TestChannel()
+
+      constructor() {
+        super()
+        fixture.channel = this.channel
+        fixture.sent = this.channel.sent
+      }
+
+      addTrack(): void {}
+      createDataChannel(): RTCDataChannel { return this.channel as unknown as RTCDataChannel }
+      async createOffer(): Promise<RTCSessionDescriptionInit> { return { type: 'offer', sdp: 'test-offer' } }
+      async setLocalDescription(description: RTCSessionDescriptionInit): Promise<void> { this.localDescription = description }
+      async setRemoteDescription(): Promise<void> { this.channel.open() }
+      getSenders(): RTCRtpSender[] { return [] }
+      close(): void { this.connectionState = 'closed' }
+    }
+
+    Object.defineProperty(window, 'RTCPeerConnection', { configurable: true, value: TestPeerConnection })
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: async () => ({
+          getTracks: () => [{ stop: () => { fixture.tracksStopped = true } }],
+          getAudioTracks: () => [{ stop: () => { fixture.tracksStopped = true } }],
+        }),
+      },
+    })
+    ;(window as unknown as { __testRealtime: typeof fixture }).__testRealtime = fixture
+  })
+}
