@@ -22,7 +22,7 @@
     "@excalidraw/excalidraw": "^0.18.1",
     "express": "^5.2.1",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
@@ -31,7 +31,7 @@
     "@types/express": "^5.0.6",
     "@types/node": "^24.13.2",
     "@types/react": "^18.3.31",
-    "@types/react-dom": "^18.3.7",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
     "@vitest/utils": "^4.1.10",
     "concurrently": "^10.0.3",
