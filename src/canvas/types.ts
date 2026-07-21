@@ -1,4 +1,4 @@
-export type CanvasElementOrigin = 'human' | 'ai' | 'seed'
+export type CanvasElementOrigin = 'human' | 'ai'
 
 export type CanvasElementOriginInput =
   | CanvasElementOrigin
@@ -29,15 +29,6 @@ export interface CanvasConnectionInput {
   toId: string
   label?: string
   origin?: CanvasElementOriginInput
-}
-
-export interface CanvasSeedNode extends CanvasNodeInput {
-  id: string
-}
-
-export interface CanvasSeed {
-  nodes: readonly CanvasSeedNode[]
-  connections?: readonly CanvasConnectionInput[]
 }
 
 export interface CanvasNodeSummary {
@@ -79,7 +70,6 @@ export interface SceneSummary {
   connectionCount: number
   humanElementCount: number
   aiElementCount: number
-  seedElementCount: number
   selectedElementIds: string[]
   elements: CanvasElementSummary[]
   nodes: CanvasNodeSummary[]
@@ -102,8 +92,9 @@ export interface CanvasBoardHandle {
 export interface CanvasBoardProps {
   className?: string
   style?: React.CSSProperties
-  initialSeed?: CanvasSeed | false
+  initialScene?: string | null
   testId?: string
   onSceneChange?: (summary: SceneSummary) => void
+  onSceneSerialized?: (scene: string) => void
   onSelectionChange?: (selectedElementIds: string[]) => void
 }

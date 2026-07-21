@@ -14,7 +14,7 @@ export interface DesignSection {
   body: string
   elementIds: string[]
   createdAt: string
-  source: 'human' | 'ai' | 'demo'
+  source: 'human' | 'ai'
 }
 
 export interface ActivityEvent {
@@ -22,11 +22,6 @@ export interface ActivityEvent {
   label: string
   detail: string
   createdAt: string
-}
-
-export interface PersistedWorkspace {
-  sections: DesignSection[]
-  transcript: TranscriptEntry[]
 }
 
 export const makeId = (prefix: string) =>

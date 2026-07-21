@@ -1,7 +1,7 @@
 {
-  "name": "cothinker-poc",
+  "name": "cothinker",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n web,server -c cyan,magenta \"npm:dev:web\" \"npm:dev:server\"",
