@@ -8,7 +8,7 @@ export const OPENAI_MODELS = {
   reasoning: 'gpt-5.6-terra',
 } as const
 
-export const REALTIME_VOICE = 'marin'
+export const REALTIME_VOICE = 'ballad'
 
 export const REALTIME_INSTRUCTIONS = [
   'Be a concise co-thinking partner for a visual idea canvas.',
