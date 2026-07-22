@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import {
   OPENAI_BASE_URL,
   OPENAI_MODELS,
+  OPENAI_TIMEOUTS_MS,
   REASONING_INSTRUCTIONS,
   openAIApiKey,
   realtimeSession,
@@ -41,10 +42,12 @@ app.post(
     form.set('session', JSON.stringify(realtimeSession))
 
     try {
+      const signal = AbortSignal.timeout(OPENAI_TIMEOUTS_MS.realtimeSession)
       const upstream = await fetch(`${OPENAI_BASE_URL}/realtime/calls`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}` },
         body: form,
+        signal,
       })
       const payload = await upstream.text()
 
@@ -58,6 +61,12 @@ app.post(
       response.status(201).type('application/sdp').send(payload)
     } catch (error) {
       console.error('Realtime session error:', error)
+      if (isTimeoutError(error)) {
+        response.status(504).json({
+          error: 'OpenAI timed out while starting the voice session.',
+        })
+        return
+      }
       response.status(502).json({
         error: 'The voice service could not be reached. Check the server connection and try again.',
       })
@@ -83,6 +92,7 @@ app.post('/api/reason', async (request, response) => {
   }
 
   try {
+    const signal = AbortSignal.timeout(OPENAI_TIMEOUTS_MS.reasoning)
     const upstream = await fetch(`${OPENAI_BASE_URL}/responses`, {
       method: 'POST',
       headers: {
@@ -95,8 +105,9 @@ app.post('/api/reason', async (request, response) => {
         instructions: REASONING_INSTRUCTIONS,
         input,
       }),
+      signal,
     })
-    const payload: unknown = await upstream.json().catch(() => undefined)
+    const payload = await readJsonPayload(upstream)
 
     if (!upstream.ok) {
       response.status(upstream.status).json({
@@ -114,6 +125,12 @@ app.post('/api/reason', async (request, response) => {
     response.json({ text })
   } catch (error) {
     console.error('Reasoning request error:', error)
+    if (isTimeoutError(error)) {
+      response.status(504).json({
+        error: 'OpenAI timed out while completing the reasoning request.',
+      })
+      return
+    }
     response.status(502).json({
       error: 'The reasoning service could not be reached. Check the server connection and try again.',
     })
@@ -162,25 +179,48 @@ function responseText(payload: unknown): string | undefined {
   return parts.join('\n').trim() || undefined
 }
 
+function isTimeoutError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'TimeoutError'
+}
+
+async function readJsonPayload(response: Response): Promise<unknown> {
+  try {
+    return await response.json()
+  } catch (error) {
+    if (error instanceof SyntaxError) return undefined
+    throw error
+  }
+}
+
+const MAX_UPSTREAM_ERROR_LENGTH = 512
+
+function sanitizeUpstreamMessage(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const message = value.trim()
+  return message ? message.slice(0, MAX_UPSTREAM_ERROR_LENGTH) : undefined
+}
+
 function extractOpenAIError(payload: string, fallback: string): string {
   try {
     return extractResponseError(JSON.parse(payload), fallback)
   } catch {
-    return payload.trim() || fallback
+    return fallback
   }
 }
 
 function extractResponseError(payload: unknown, fallback: string): string {
   if (!isRecord(payload)) return fallback
-  if (typeof payload.message === 'string') return payload.message
-  if (isRecord(payload.error) && typeof payload.error.message === 'string') {
-    return payload.error.message
-  }
+  const message = sanitizeUpstreamMessage(payload.message)
+  if (message) return message
+  const nestedMessage = isRecord(payload.error)
+    ? sanitizeUpstreamMessage(payload.error.message)
+    : undefined
+  if (nestedMessage) return nestedMessage
   return fallback
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function serveProductionBuild(expressApp: express.Express): void {
