@@ -1,0 +1,179 @@
+name: Dispatch agent-ready issue
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: agent-dispatch-${{ github.repository }}-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: Claim and dispatch issue
+    if: github.event.label.name == 'agent:ready' && github.event.issue.state == 'open'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate configuration and current issue state
+        id: validate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ROUTINE_URL: ${{ vars.CLAUDE_ROUTINE_URL }}
+          ROUTINE_TOKEN: ${{ secrets.CLAUDE_ROUTINE_TOKEN }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$ROUTINE_URL" || -z "$ROUTINE_TOKEN" ]]; then
+            echo "Claude Routine URL or token is not configured" >&2
+            exit 1
+          fi
+
+          expected_url="https://github.com/${TARGET_REPOSITORY}/issues/${ISSUE_NUMBER}"
+          if [[ "$ISSUE_URL" != "$expected_url" ]]; then
+            echo "Issue URL does not match repository and issue number" >&2
+            exit 1
+          fi
+
+          issue_json="$(gh api "repos/${TARGET_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          if [[ "$(jq -r '.state' <<<"$issue_json")" != "open" ]]; then
+            echo "Issue is not open; skipping dispatch"
+            echo "should_dispatch=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if jq -e '.labels[] | select(.name == "agent:running")' <<<"$issue_json" >/dev/null; then
+            echo "Issue is already running; skipping duplicate dispatch"
+            echo "should_dispatch=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! jq -e '.labels[] | select(.name == "agent:ready")' <<<"$issue_json" >/dev/null; then
+            echo "Issue is no longer ready; skipping stale dispatch"
+            echo "should_dispatch=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "should_dispatch=true" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure workflow labels exist
+        if: steps.validate.outputs.should_dispatch == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh label create "agent:running" --repo "$TARGET_REPOSITORY" --color "1D76DB" --description "An agent is working on this issue" --force
+          gh label create "agent:dispatch-failed" --repo "$TARGET_REPOSITORY" --color "D73A4A" --description "The agent dispatch was rejected or failed" --force
+          gh label create "agent:needs-review" --repo "$TARGET_REPOSITORY" --color "FBCA04" --description "Agent work is ready for human review" --force
+          gh label create "agent:needs-human" --repo "$TARGET_REPOSITORY" --color "B60205" --description "Agent work requires a human decision" --force
+
+      - name: Claim issue
+        id: claim
+        if: steps.validate.outputs.should_dispatch == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE_NUMBER" --repo "$TARGET_REPOSITORY" --remove-label "agent:ready" --add-label "agent:running"
+          gh api --method DELETE "repos/${TARGET_REPOSITORY}/issues/${ISSUE_NUMBER}/labels/agent%3Adispatch-failed" >/dev/null 2>&1 || true
+          echo "claimed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Fire Claude Routine
+        id: fire
+        if: steps.claim.outputs.claimed == 'true'
+        env:
+          ROUTINE_URL: ${{ vars.CLAUDE_ROUTINE_URL }}
+          ROUTINE_TOKEN: ${{ secrets.CLAUDE_ROUTINE_TOKEN }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          AUTHORIZED_BY: ${{ github.actor }}
+          OCCURRED_AT: ${{ github.event.issue.updated_at }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          dispatch_id="${TARGET_REPOSITORY}#${ISSUE_NUMBER}:github-run-${GITHUB_RUN_ID}"
+          event_envelope="$(jq -nc \
+            --arg schema "agentic.issue-ready.v0" \
+            --arg event_type "issue.ready" \
+            --arg dispatch_id "$dispatch_id" \
+            --arg repository "$TARGET_REPOSITORY" \
+            --argjson issue_number "$ISSUE_NUMBER" \
+            --arg issue_url "$ISSUE_URL" \
+            --arg authorized_by "$AUTHORIZED_BY" \
+            --arg occurred_at "$OCCURRED_AT" \
+            '{schema:$schema,event_type:$event_type,dispatch_id:$dispatch_id,repository:$repository,issue_number:$issue_number,issue_url:$issue_url,authorized_by:$authorized_by,occurred_at:$occurred_at}')"
+          request_body="$(jq -nc --arg text "$event_envelope" '{text:$text}')"
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
+
+          http_code="$(curl --silent --show-error \
+            --output "$response_file" \
+            --write-out "%{http_code}" \
+            --request POST "$ROUTINE_URL" \
+            --header "Authorization: Bearer $ROUTINE_TOKEN" \
+            --header "anthropic-beta: experimental-cc-routine-2026-04-01" \
+            --header "anthropic-version: 2023-06-01" \
+            --header "Content-Type: application/json" \
+            --data "$request_body")"
+
+          if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+            echo "Claude Routine rejected dispatch with HTTP ${http_code}" >&2
+            exit 1
+          fi
+
+          session_id="$(jq -er '.claude_code_session_id' "$response_file")"
+          session_url="$(jq -er '.claude_code_session_url' "$response_file")"
+          echo "::add-mask::$session_url"
+          {
+            echo "accepted=true"
+            echo "session_id=$session_id"
+            echo "session_url=$session_url"
+            echo "dispatch_id=$dispatch_id"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Record dispatch receipt
+        if: steps.fire.outputs.accepted == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          DISPATCH_ID: ${{ steps.fire.outputs.dispatch_id }}
+          SESSION_ID: ${{ steps.fire.outputs.session_id }}
+          SESSION_URL: ${{ steps.fire.outputs.session_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          body="$(printf '%s\n\n%s\n%s\n%s\n' \
+            '<!-- agentic-os:dispatch-receipt -->' \
+            'Agent dispatch accepted.' \
+            "- Dispatch: \`$DISPATCH_ID\`" \
+            "- Session: [$SESSION_ID]($SESSION_URL) · [workflow run]($run_url)")"
+          gh issue comment "$ISSUE_NUMBER" --repo "$TARGET_REPOSITORY" --body "$body"
+
+      - name: Restore issue after rejected dispatch
+        if: failure() && steps.claim.outputs.claimed == 'true' && steps.fire.outputs.accepted != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE_NUMBER" --repo "$TARGET_REPOSITORY" --remove-label "agent:running" --add-label "agent:ready,agent:dispatch-failed"
+          run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          gh issue comment "$ISSUE_NUMBER" --repo "$TARGET_REPOSITORY" --body "Agent dispatch failed before a Claude session was accepted. [Inspect the workflow run]($run_url)."
