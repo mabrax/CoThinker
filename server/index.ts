@@ -248,13 +248,30 @@ function serveProductionBuild(expressApp: express.Express): void {
   })
 }
 
+const DEFAULT_SERVER_PORT = 3001
+const SERVER_HOST = '127.0.0.1'
+
+function parseServerPort(value: string | undefined): number {
+  if (value === undefined) return DEFAULT_SERVER_PORT
+
+  const normalizedValue = value.trim()
+  if (!/^[0-9]+$/.test(normalizedValue)) {
+    throw new Error('PORT must be an integer from 1 through 65535.')
+  }
+
+  const port = Number(normalizedValue)
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error('PORT must be an integer from 1 through 65535.')
+  }
+  return port
+}
+
 function startServer() {
-  const requestedPort = Number(process.env.PORT ?? 3001)
-  const port = Number.isFinite(requestedPort) ? requestedPort : 3001
-  return app.listen(port, () => {
-    console.log(`CoThinker server listening on http://localhost:${port}`)
+  const port = parseServerPort(process.env.PORT)
+  return app.listen(port, SERVER_HOST, () => {
+    console.log(`CoThinker server listening on http://${SERVER_HOST}:${port}`)
   })
 }
 
-export { app, realtimeSession, startServer }
+export { app, parseServerPort, realtimeSession, startServer }
 export default app

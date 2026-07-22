@@ -1,10 +1,11 @@
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { app } from './index.js'
+import { app, parseServerPort, startServer } from './index.js'
 
 const realFetch = globalThis.fetch
 const originalApiKey = process.env.OPENAI_API_KEY
+const originalPort = process.env.PORT
 let server: Server | undefined
 
 type OpenAIRoute = 'realtime' | 'reasoning'
@@ -86,6 +87,8 @@ afterEach(async () => {
   globalThis.fetch = realFetch
   if (originalApiKey === undefined) delete process.env.OPENAI_API_KEY
   else process.env.OPENAI_API_KEY = originalApiKey
+  if (originalPort === undefined) delete process.env.PORT
+  else process.env.PORT = originalPort
   vi.restoreAllMocks()
   if (server) {
     await new Promise<void>((resolve, reject) =>
@@ -93,6 +96,60 @@ afterEach(async () => {
     )
     server = undefined
   }
+})
+
+describe('server startup', () => {
+  it.each([
+    { name: 'an absent value', value: undefined, expected: 3001 },
+    { name: 'the lower boundary', value: '1', expected: 1 },
+    { name: 'the upper boundary', value: '65535', expected: 65_535 },
+    { name: 'a normal custom port', value: '4321', expected: 4321 },
+    { name: 'surrounding whitespace', value: ' \t3001\n', expected: 3001 },
+    { name: 'leading zeroes', value: '003001', expected: 3001 },
+  ])('parses $name', ({ value, expected }) => {
+    expect(parseServerPort(value)).toBe(expected)
+  })
+
+  it.each([
+    { name: 'empty text', value: '' },
+    { name: 'whitespace-only text', value: ' \t\n' },
+    { name: 'zero', value: '0' },
+    { name: 'a negative integer', value: '-1' },
+    { name: 'a fractional number', value: '1.5' },
+    { name: 'a value above the upper boundary', value: '65536' },
+    { name: 'alphabetic text', value: 'port' },
+    { name: 'Infinity', value: 'Infinity' },
+    { name: 'hexadecimal notation', value: '0x0bb9' },
+    { name: 'exponential notation', value: '3e3' },
+    { name: 'an explicit plus sign', value: '+3001' },
+    { name: 'an explicit minus sign', value: '-3001' },
+  ])('rejects $name with the configuration error', ({ value }) => {
+    expect(() => parseServerPort(value)).toThrowError(
+      new Error('PORT must be an integer from 1 through 65535.'),
+    )
+  })
+
+  it('passes the validated port and loopback host to app.listen', () => {
+    process.env.PORT = ' 004321 '
+    const serverValue = {} as ReturnType<typeof app.listen>
+    const listenSpy = vi.spyOn(app, 'listen').mockReturnValue(serverValue)
+
+    const result = startServer()
+
+    expect(result).toBe(serverValue)
+    expect(listenSpy).toHaveBeenCalledOnce()
+    expect(listenSpy).toHaveBeenCalledWith(4321, '127.0.0.1', expect.any(Function))
+  })
+
+  it('rejects invalid configuration before app.listen', () => {
+    process.env.PORT = '0'
+    const listenSpy = vi.spyOn(app, 'listen')
+
+    expect(() => startServer()).toThrowError(
+      new Error('PORT must be an integer from 1 through 65535.'),
+    )
+    expect(listenSpy).not.toHaveBeenCalled()
+  })
 })
 
 describe('OpenAI server boundaries', () => {

@@ -19,6 +19,8 @@ Open `http://127.0.0.1:5173`. When the key is absent, CoThinker deliberately sho
 
 `npm run dev` loads the optional `.env` file into the server process. Process environment values take precedence. The browser never receives the API key.
 
+The combined `npm run dev` workflow expects the Express server on port 3001 because Vite's `/api` proxy target is fixed at `http://127.0.0.1:3001`. A valid custom `PORT` can be used with `npm run dev:server`, `npm start`, or another client that addresses the server directly; it does not automatically reconfigure Vite.
+
 Confirm setup without revealing credentials:
 
 ```powershell
