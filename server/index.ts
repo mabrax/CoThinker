@@ -139,13 +139,19 @@ app.post('/api/reason', async (request, response) => {
 
 serveProductionBuild(app)
 
-function reasoningInput(body: unknown): unknown | undefined {
-  if (typeof body === 'string' && body.trim()) return body.trim()
+type ReasoningInput = string | Record<string, unknown>[]
+
+function directReasoningInput(value: unknown): ReasoningInput | undefined {
+  if (typeof value === 'string') return value.trim() || undefined
+  if (!Array.isArray(value) || value.length === 0 || !value.every(isRecord)) return undefined
+  return value
+}
+
+function reasoningInput(body: unknown): ReasoningInput | undefined {
   if (!isRecord(body)) return undefined
 
   if (body.input !== undefined) {
-    if (typeof body.input === 'string') return body.input.trim() || undefined
-    return body.input
+    return directReasoningInput(body.input)
   }
 
   const prompt = [body.prompt, body.question].find(

@@ -43,11 +43,14 @@ function requestRealtime(baseUrl: string): Promise<Response> {
   })
 }
 
-function requestReasoning(baseUrl: string): Promise<Response> {
+function requestReasoning(
+  baseUrl: string,
+  body: unknown = { prompt: 'How should delegation work?' },
+): Promise<Response> {
   return realFetch(`${baseUrl}/api/reason`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: 'How should delegation work?' }),
+    body: JSON.stringify(body),
   })
 }
 
@@ -356,5 +359,130 @@ describe('OpenAI server boundaries', () => {
     await expect(response.json()).resolves.toEqual({
       error: 'The reasoning request completed without a text answer.',
     })
+  })
+
+  it.each([
+    { name: 'null', input: null },
+    { name: 'a Boolean', input: false },
+    { name: 'a number', input: 42 },
+    { name: 'a top-level record', input: {} },
+    { name: 'a blank string', input: ' \n\t ' },
+    { name: 'an empty array', input: [] },
+    { name: 'an array containing null', input: [null] },
+    { name: 'an array containing a string', input: ['item'] },
+    { name: 'an array containing a number', input: [1] },
+    { name: 'an array containing a Boolean', input: [true] },
+    { name: 'an array containing a nested array', input: [[]] },
+  ])('rejects direct reasoning input that is $name before provider work', async ({ input }) => {
+    process.env.OPENAI_API_KEY = 'test-server-key'
+    const upstreamFetch = vi.fn()
+    globalThis.fetch = upstreamFetch as typeof fetch
+    const baseUrl = await startTestServer()
+
+    const response = await requestReasoning(baseUrl, { input })
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({ error: 'A reasoning prompt is required.' })
+    expect(upstreamFetch).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { input: null, prompt: 'Use this prompt instead.' },
+    { input: [], question: 'Use this question instead.' },
+  ])('keeps defined invalid direct input authoritative over prompt fallbacks', async (body) => {
+    process.env.OPENAI_API_KEY = 'test-server-key'
+    const upstreamFetch = vi.fn()
+    globalThis.fetch = upstreamFetch as typeof fetch
+    const baseUrl = await startTestServer()
+
+    const response = await requestReasoning(baseUrl, body)
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({ error: 'A reasoning prompt is required.' })
+    expect(upstreamFetch).not.toHaveBeenCalled()
+  })
+
+  it('leaves whole-body JSON strings to the strict Express parser', async () => {
+    process.env.OPENAI_API_KEY = 'test-server-key'
+    const upstreamFetch = vi.fn()
+    globalThis.fetch = upstreamFetch as typeof fetch
+    const baseUrl = await startTestServer()
+
+    const response = await requestReasoning(baseUrl, 'primitive request body')
+
+    expect(response.status).toBe(400)
+    expect(upstreamFetch).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    {
+      name: 'a trimmed direct string',
+      body: { input: '  Keep the boundary narrow. \n' },
+      expectedInput: 'Keep the boundary narrow.',
+    },
+    {
+      name: 'a nonempty direct record array',
+      body: { input: [{}, { type: 'message', content: [{ type: 'input_text', text: 'Plan it.' }] }] },
+      expectedInput: [
+        {},
+        { type: 'message', content: [{ type: 'input_text', text: 'Plan it.' }] },
+      ],
+    },
+    {
+      name: 'prompt before question without context',
+      body: { prompt: '  Preferred prompt  ', question: 'Ignored question' },
+      expectedInput: 'Preferred prompt',
+    },
+    {
+      name: 'question when prompt is blank',
+      body: { prompt: ' \n ', question: '  Fallback question  ' },
+      expectedInput: 'Fallback question',
+    },
+    {
+      name: 'string context before canvas with whitespace preserved',
+      body: {
+        prompt: '  Explain the design  ',
+        context: '  exact context whitespace  ',
+        canvas: { ignored: true },
+      },
+      expectedInput: 'Explain the design\n\nContext:\n  exact context whitespace  ',
+    },
+    {
+      name: 'pretty-serialized record context',
+      body: { prompt: 'Explain', context: { topic: 'delegation', steps: [1, 2] } },
+      expectedInput: `Explain\n\nContext:\n${JSON.stringify(
+        { topic: 'delegation', steps: [1, 2] },
+        null,
+        2,
+      )}`,
+    },
+    {
+      name: 'canvas fallback for null context',
+      body: { question: 'Review', context: null, canvas: { nodes: [{ id: 'one' }] } },
+      expectedInput: `Review\n\nContext:\n${JSON.stringify(
+        { nodes: [{ id: 'one' }] },
+        null,
+        2,
+      )}`,
+    },
+  ])('serializes $name as the exact provider input', async ({ body, expectedInput }) => {
+    process.env.OPENAI_API_KEY = 'test-server-key'
+    const upstreamFetch = vi.fn(
+      async (_input: string | URL | Request, _init?: RequestInit) =>
+        Response.json({ output_text: 'Accepted input reached the provider.' }),
+    )
+    globalThis.fetch = upstreamFetch as typeof fetch
+    const baseUrl = await startTestServer()
+
+    const response = await requestReasoning(baseUrl, body)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({
+      text: 'Accepted input reached the provider.',
+    })
+    expect(upstreamFetch).toHaveBeenCalledTimes(1)
+    expect(String(upstreamFetch.mock.calls[0]?.[0])).toMatch(/\/responses$/)
+    const providerBody = JSON.parse(String(upstreamFetch.mock.calls[0]?.[1]?.body))
+    expect(providerBody.input).toEqual(expectedInput)
   })
 })
